@@ -1,0 +1,30 @@
+name: Build AppManager
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build debug universal APK
+        run: ./gradlew packageDebugUniversalApk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: appmanager-debug-apk
+          path: '**/build/outputs/**/*.apk'
