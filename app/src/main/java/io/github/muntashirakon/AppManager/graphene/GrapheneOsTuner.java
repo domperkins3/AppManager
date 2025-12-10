@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 /**
  * Experimental helper for GrapheneOS-aware tuning.
  *
- * Right now this class understands how to:
+ * This class can:
  *  - Look at logcat lines (one or many)
  *  - Detect obvious permission / AppOp / component issues
  *  - Represent them as Issue objects
@@ -69,11 +69,6 @@ public class GrapheneOsTuner {
 
     /**
      * A high-level suggestion derived from one or more issues.
-     *
-     * Later we can extend this with machine-usable data such as:
-     *  - exact permission name
-     *  - app-op name
-     *  - component name
      */
     public static class Recommendation {
         public final RecommendationType type;
@@ -106,7 +101,7 @@ public class GrapheneOsTuner {
                     Pattern.CASE_INSENSITIVE);
 
     /**
-     * Temporary method so we can test things without touching the UI.
+     * Quick status string, useful for debugging.
      */
     public String getStatus() {
         return "GrapheneOS tuner: analysis + recommendation logic is active";
@@ -130,17 +125,138 @@ public class GrapheneOsTuner {
             if (permission != null) {
                 shortMsg = "Permission denied: " + permission;
             } else {
-                shortMsg = "Permission denied (exact permission unknown)";
+                shortMsg = "Permission denied (permission unknown)";
             }
             return new Issue(IssueType.PERMISSION_DENIED, line, shortMsg, line);
         }
 
         // Check for AppOp-related blocks
         if (appOpBlockedPattern.matcher(line).find()) {
-            String shortMsg = "Operation blocked by AppOps / app-op policy";
+            String shortMsg = "Operation blocked by AppOps (app-op policy)";
             return new Issue(IssueType.APP_OP_BLOCKED, line, shortMsg, line);
         }
 
         // Check for disabled / blocked components
         if (componentDisabledPattern.matcher(line).find()) {
-            String shortMsg = "Component (service/
+            String shortMsg = "Service or receiver seems disabled or blocked";
+            return new Issue(IssueType.COMPONENT_DISABLED_OR_BLOCKED, line, shortMsg, line);
+        }
+
+        // Most lines won't be interesting to us
+        return null;
+    }
+
+    /**
+     * Analyze many logcat lines at once and return all issues found.
+     */
+    public List<Issue> analyzeLogLines(Iterable<String> lines) {
+        List<Issue> issues = new ArrayList<>();
+        if (lines == null) {
+            return issues;
+        }
+
+        for (String line : lines) {
+            Issue issue = analyzeLogLine(line);
+            if (issue != null) {
+                issues.add(issue);
+            }
+        }
+        return issues;
+    }
+
+    /**
+     * Turn detected issues into high-level recommendations based on tuning mode.
+     *
+     * This does NOT perform any changes; it only describes what we think
+     * the user (or App Manager, later) might want to do.
+     */
+    public List<Recommendation> buildRecommendations(List<Issue> issues, TuningMode mode) {
+        List<Recommendation> result = new ArrayList<>();
+        if (issues == null || issues.isEmpty()) {
+            return result;
+        }
+
+        for (Issue issue : issues) {
+            if (issue == null) {
+                continue;
+            }
+
+            switch (issue.type) {
+                case PERMISSION_DENIED: {
+                    String permName = extractPermissionName(issue.rawLine);
+                    if (permName == null) {
+                        permName = "a specific permission";
+                    }
+
+                    String msg;
+                    switch (mode) {
+                        case SECURITY_FIRST:
+                            msg = "App was blocked because it lacks " + permName
+                                    + ". In security-first mode, keep this denied unless the feature is essential.";
+                            break;
+                        case BALANCED:
+                            msg = "App was blocked because it lacks " + permName
+                                    + ". In balanced mode, you may grant just this permission for the feature you used.";
+                            break;
+                        case FUNCTION_FIRST:
+                        default:
+                            msg = "App was blocked because it lacks " + permName
+                                    + ". In function-first mode, granting this permission will likely fix that feature.";
+                            break;
+                    }
+
+                    result.add(new Recommendation(
+                            RecommendationType.GRANT_PERMISSION,
+                            msg,
+                            issue
+                    ));
+                    break;
+                }
+
+                case APP_OP_BLOCKED: {
+                    String msg;
+                    switch (mode) {
+                        case SECURITY_FIRST:
+                            msg = "An operation was blocked by AppOps. In security-first mode, keep it blocked unless the app is highly trusted.";
+                            break;
+                        case BALANCED:
+                            msg = "An operation was blocked by AppOps. In balanced mode, you may allow it in foreground-only if needed.";
+                            break;
+                        case FUNCTION_FIRST:
+                        default:
+                            msg = "An operation was blocked by AppOps. In function-first mode, allowing this app-op will likely fix the feature.";
+                            break;
+                    }
+
+                    result.add(new Recommendation(
+                            RecommendationType.RELAX_APP_OP,
+                            msg,
+                            issue
+                    ));
+                    break;
+                }
+
+                case COMPONENT_DISABLED_OR_BLOCKED: {
+                    String msg;
+                    switch (mode) {
+                        case SECURITY_FIRST:
+                            msg = "A service or receiver appears disabled or blocked. In security-first mode, leave it disabled unless absolutely required.";
+                            break;
+                        case BALANCED:
+                            msg = "A service or receiver appears disabled or blocked. In balanced mode, you can selectively re-enable only this component if needed.";
+                            break;
+                        case FUNCTION_FIRST:
+                        default:
+                            msg = "A service or receiver appears disabled or blocked. Re-enabling this component may be required for full functionality.";
+                            break;
+                    }
+
+                    result.add(new Recommendation(
+                            RecommendationType.REVIEW_COMPONENT,
+                            msg,
+                            issue
+                    ));
+                    break;
+                }
+
+                case UNKNOWN:
