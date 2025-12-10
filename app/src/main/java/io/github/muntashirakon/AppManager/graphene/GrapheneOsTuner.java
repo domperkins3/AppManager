@@ -8,10 +8,11 @@ import java.util.regex.Pattern;
 /**
  * Experimental helper for GrapheneOS-aware tuning.
  *
- * For now this class only understands how to:
+ * Right now this class understands how to:
  *  - Look at logcat lines (one or many)
  *  - Detect obvious permission / AppOp / component issues
  *  - Represent them as Issue objects
+ *  - Turn issues into high-level recommendations
  *
  * Later, this will be used together with ADB logcat streaming and
  * App Manager's log viewer to build a "GrapheneOS smart tuning"
@@ -30,6 +31,26 @@ public class GrapheneOsTuner {
     }
 
     /**
+     * How aggressive we want to be about fixing problems.
+     */
+    public enum TuningMode {
+        SECURITY_FIRST,
+        BALANCED,
+        FUNCTION_FIRST
+    }
+
+    /**
+     * Types of recommendations we can give.
+     */
+    public enum RecommendationType {
+        GRANT_PERMISSION,
+        RELAX_APP_OP,
+        REVIEW_COMPONENT,
+        MANUAL_GRAPHENEOS_STEP,
+        GENERAL_INFO
+    }
+
+    /**
      * One problem detected in log output.
      */
     public static class Issue {
@@ -43,6 +64,26 @@ public class GrapheneOsTuner {
             this.rawLine = rawLine;
             this.shortMessage = shortMessage;
             this.detail = detail;
+        }
+    }
+
+    /**
+     * A high-level suggestion derived from one or more issues.
+     *
+     * Later we can extend this with machine-usable data such as:
+     *  - exact permission name
+     *  - app-op name
+     *  - component name
+     */
+    public static class Recommendation {
+        public final RecommendationType type;
+        public final String message;
+        public final Issue sourceIssue;
+
+        public Recommendation(RecommendationType type, String message, Issue sourceIssue) {
+            this.type = type;
+            this.message = message;
+            this.sourceIssue = sourceIssue;
         }
     }
 
@@ -68,7 +109,7 @@ public class GrapheneOsTuner {
      * Temporary method so we can test things without touching the UI.
      */
     public String getStatus() {
-        return "GrapheneOS tuner: basic log-line analysis active";
+        return "GrapheneOS tuner: analysis + recommendation logic is active";
     }
 
     /**
@@ -102,52 +143,4 @@ public class GrapheneOsTuner {
 
         // Check for disabled / blocked components
         if (componentDisabledPattern.matcher(line).find()) {
-            String shortMsg = "Component (service/receiver) seems disabled or blocked";
-            return new Issue(IssueType.COMPONENT_DISABLED_OR_BLOCKED, line, shortMsg, line);
-        }
-
-        // Most lines won't be interesting to us
-        return null;
-    }
-
-    /**
-     * Analyze many logcat lines at once and return all issues found.
-     *
-     * This is what we'll use later when we have a captured log buffer
-     * from the app being tested.
-     */
-    public List<Issue> analyzeLogLines(Iterable<String> lines) {
-        List<Issue> issues = new ArrayList<>();
-        if (lines == null) {
-            return issues;
-        }
-
-        for (String line : lines) {
-            Issue issue = analyzeLogLine(line);
-            if (issue != null) {
-                issues.add(issue);
-            }
-        }
-        return issues;
-    }
-
-    /**
-     * Try to pull out something that looks like a permission name from a log line.
-     *
-     * Example patterns we might see:
-     *  - "requires android.permission.CAMERA"
-     *  - "requires com.android.voicemail.permission.ADD_VOICEMAIL"
-     */
-    private String extractPermissionName(String line) {
-        if (line == null) {
-            return null;
-        }
-
-        Pattern permPattern = Pattern.compile("requires ([\\w\\.]+(?:\\.[\\w]+)*)");
-        Matcher m = permPattern.matcher(line);
-        if (m.find()) {
-            return m.group(1);
-        }
-        return null;
-    }
-}
+            String shortMsg = "Component (service/
