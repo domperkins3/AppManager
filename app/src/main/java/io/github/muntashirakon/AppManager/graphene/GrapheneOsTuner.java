@@ -1,5 +1,7 @@
 package io.github.muntashirakon.AppManager.graphene;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -7,12 +9,13 @@ import java.util.regex.Pattern;
  * Experimental helper for GrapheneOS-aware tuning.
  *
  * For now this class only understands how to:
- *  - Look at a single logcat line
+ *  - Look at logcat lines (one or many)
  *  - Detect obvious permission / AppOp / component issues
  *  - Represent them as Issue objects
  *
- * Later, this will be used together with ADB logcat streaming to
- * build a "GrapheneOS smart tuning" report for an app.
+ * Later, this will be used together with ADB logcat streaming and
+ * App Manager's log viewer to build a "GrapheneOS smart tuning"
+ * report for an app.
  */
 public class GrapheneOsTuner {
 
@@ -27,10 +30,7 @@ public class GrapheneOsTuner {
     }
 
     /**
-     * One problem detected in a log line.
-     *
-     * In the future we can add more fields like "suggested fix",
-     * "affected permission", etc. For now we keep it simple.
+     * One problem detected in log output.
      */
     public static class Issue {
         public final IssueType type;
@@ -60,7 +60,7 @@ public class GrapheneOsTuner {
 
     // Rough matches for disabled or blocked components/services
     private final Pattern componentDisabledPattern =
-            Pattern.compile("not exported from uid|not exported from uid|not allowed to start service|"
+            Pattern.compile("not exported from uid|not allowed to start service|"
                             + "Unable to start service|Service not registered",
                     Pattern.CASE_INSENSITIVE);
 
@@ -108,6 +108,27 @@ public class GrapheneOsTuner {
 
         // Most lines won't be interesting to us
         return null;
+    }
+
+    /**
+     * Analyze many logcat lines at once and return all issues found.
+     *
+     * This is what we'll use later when we have a captured log buffer
+     * from the app being tested.
+     */
+    public List<Issue> analyzeLogLines(Iterable<String> lines) {
+        List<Issue> issues = new ArrayList<>();
+        if (lines == null) {
+            return issues;
+        }
+
+        for (String line : lines) {
+            Issue issue = analyzeLogLine(line);
+            if (issue != null) {
+                issues.add(issue);
+            }
+        }
+        return issues;
     }
 
     /**
